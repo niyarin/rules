@@ -2,6 +2,7 @@
 
 (import (scheme base)
         (niyarin rules)
+        (scheme write);;
         (srfi 78))
 
 (let ((matched (rules/match '()
@@ -23,5 +24,11 @@
                             '(a b)
                             '(1 2 3 4))))
   (check (not (not matched)) => #f))
+
+(let ((match-expand-res
+        (rules/match-expand '() '(let ((variable init) ...) body ...)
+                                '((lambda (variable ...) body ...) init ...)
+                                '(let ((a 1) (b 2)) 'hello (cons a b)))))
+  (check match-expand-res => '((lambda (a b) 'hello (cons a b)) 1 2)))
 
 (check-report)
