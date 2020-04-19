@@ -1,6 +1,8 @@
 (define-library (niyarin rules)
-   (import (scheme base)(scheme case-lambda))
-   (export rules/match)
+   (import (scheme base)(scheme case-lambda)
+           (scheme write);debug
+           )
+   (export rules/match rules/expand rules/match-expand)
    (begin
       (define (%parse-list ellipsis-symbol ls)
         (let loop ((ls ls)
@@ -133,6 +135,8 @@
                (append
                  (%match ellipsis-symbol literals last-cdr input break)
                  res))
+              ((and (eq? type 'list) (not (null? input)))
+                (break #f))
               (else res)))))
 
 
@@ -155,6 +159,59 @@
           (lambda (break)
             (%match ellipsis literal rule input break))))
 
+      (define (%tree-ref tree refs break . debug-info)
+         (let loop ((refs refs)
+                    (tree tree))
+           (cond
+             ((null? refs) tree)
+             ((not (list?  tree) )(error "Wrong depth to expand." debug-info))
+             ((<= (length tree) (car refs))
+              (break (length refs)))
+             (else
+               (loop (cdr refs) (list-ref tree (car refs)))))))
+
+      (define (%expand-pair ellipsis template alist refs break)
+        (let ((res-cell-top (list #f)))
+            (let loop ((ls template)
+                       (res-cell res-cell-top))
+              (cond
+                ((not (pair? ls))
+                 (set-cdr! res-cell (%expand ellipsis ls alist refs break))
+                 (cdr res-cell-top))
+                ((and (pair? (cdr ls))
+                      (eq? (cadr ls) ellipsis))
+                    (let _loop ((i 0)(res-cell res-cell))
+                      (let ((ok (call/cc (lambda (_break)
+                                           (list (%expand ellipsis (car ls) alist (cons i refs) _break))))))
+                        (cond
+                          ((not (integer? ok))
+                            (set-cdr! res-cell ok)
+                            (_loop (+ i 1) (cdr res-cell)))
+                          ((zero? (- ok 1))
+                           (loop (cddr ls) res-cell))
+                          (else
+                            (break (- ok 1)))))))
+                (else
+                  (set-cdr! res-cell (list (%expand ellipsis (car ls) alist refs break)))
+                  (loop (cdr ls) (cdr res-cell)))))))
+
+
+      (define (%expand ellipsis template alist refs break)
+        (cond
+          ((pair? template)
+           (%expand-pair ellipsis template alist refs break))
+          ((and (symbol? template)
+                (assq template alist))
+           => (lambda (apair)
+                (%tree-ref (cdr apair) (reverse refs) break template)))
+          (else template)))
+
+
+      (define (%expand-boot ellipsis template alist)
+          (call/cc
+            (lambda (break)
+                (%expand ellipsis template alist '() break))))
+
       (define rules/match
         (case-lambda
           ((rule input)
@@ -162,4 +219,26 @@
           ((literals rule input)
            (%match-boot '... literals rule input))
           ((ellipsis literals rule input)
-           (%match-boot ellipsis literals rule input))))))
+           (%match-boot ellipsis literals rule input))))
+
+      (define rules/expand
+        (case-lambda
+          ((template alist)
+           (%expand-boot '... template alist))
+          ((ellipsis template alist)
+           (%expand-boot ellipsis template alist))))
+
+      (define (%match-expand-boot ellipsis literal rule template input)
+        (let ((match-res (rules/match ellipsis literal rule input)))
+          (if match-res
+            (rules/expand ellipsis template match-res)
+            #f)))
+
+      (define rules/match-expand
+        (case-lambda
+          ((ellipsis literals rule template input)
+           (%match-expand-boot ellipsis literals rule template input))
+          ((literals rule template input)
+           (%match-expand-boot '... literals rule template input))
+          ((rule template input)
+           (%match-expand-boot '... '() rule template input))))))
