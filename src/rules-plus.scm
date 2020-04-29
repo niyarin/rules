@@ -91,6 +91,12 @@
            (let ((tree (cond ((assq rule res) => cdr) (else '()))))
             (cons (cons rule (%tree-push-obj nests input tree))
                   res)))
+          ((procedure? rule)
+           (if (rule input)
+             (let ((tree (cond ((assq rule res) => cdr) (else '()))))
+                (cons (cons rule (%tree-push-obj nests input tree))
+                      res))
+             (break #f)))
           ((equal? rule input) res)
           (else (break #f))))
 
@@ -140,7 +146,7 @@
         (cond
           ((pair? template)
            (%expand-pair ellipsis template alist refs break))
-          ((and (symbol? template)
+          ((and (or (symbol? template) (procedure? template))
                 (assq template alist))
            => (lambda (apair)
                 (%tree-ref (cdr apair) (reverse refs) break template)))
@@ -169,9 +175,9 @@
            (%expand-boot ellipsis template alist))))
 
       (define (%match-expand-boot ellipsis literal rule template input)
-        (let ((match-res (rules/match ellipsis literal rule input)))
+        (let ((match-res (rules+/match ellipsis literal rule input)))
           (if match-res
-            (rules/expand ellipsis template match-res)
+            (rules+/expand ellipsis template match-res)
             #f)))
 
       (define rules+/match-expand
