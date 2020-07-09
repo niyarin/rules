@@ -1,9 +1,9 @@
 (define-library (niyarin rules+)
-   (import (scheme base)(scheme case-lambda))
+   (import (scheme base)(scheme case-lambda) (scheme list) (scheme write))
    (export rules+/match rules+/expand rules+/match-expand)
    (begin
       (define (%alists-distinct . args)
-        (let ((alist (apply append args)))
+        (let ((alist (concatenate args)))
           (let loop ((als alist)
                      (res '())
                      (keys '()))
@@ -36,7 +36,7 @@
                    (null? input))
               res)
              ((null? input) (break #f))
-             ((not (pair? rule))
+             ((not-pair? rule)
               (%match ellipsis literals rule nests input res break))
              ((%ellipsis-rule? rule ellipsis)
               (or (call/cc (lambda (_break)
@@ -50,7 +50,7 @@
                                               _break)))
                                (loop rule (cdr input) _break (+ nest-cnt 1) new-res))))
                   (loop (cddr rule) input break 0 res)))
-             ((not (pair? input))
+             ((not-pair? input)
               (break #f))
              (else (loop (cdr rule)
                          (cdr input)
@@ -102,10 +102,105 @@
           ((equal? rule input) res)
           (else (break #f))))
 
-      (define (%match-boot ellipsis literals rule input)
-        (call/cc (lambda (break)
-                   (%alists-distinct
-                     (%match ellipsis literals rule '() input '() break)))))
+      (define (%new-rule&duplicates-alist rule symbols duplicates)
+        (let ((res-alist (map (lambda (x) (list x 1)) duplicates)))
+          (letrec
+            ((gen-sym
+               (lambda (base-symbol)
+                 (let loop ((cnt (cadr (assq base-symbol res-alist))))
+                   (let ((new (string->symbol
+                                (string-append (symbol->string base-symbol)
+                                               (number->string cnt)))))
+                     (if (not (memq new symbols))
+                       new
+                       (loop (+ cnt 1)))))))
+             (loop (lambda (obj)
+                       (cond
+                         ((list? obj) (map loop obj))
+                         ((vector? obj) (vector-map loop obj))
+                         ((and (symbol? obj)
+                               (memq obj duplicates)
+                               (assq obj res-alist))
+                          => (lambda (apair)
+                               (let ((new-sym (gen-sym obj)))
+                                 (begin
+                                   (set-cdr! (cdr apair) (cons new-sym
+                                                               (cddr apair)))
+                                   (set-car! (cdr apair) (+ (cadr apair) 1))
+                                   new-sym))))
+                         (else obj)))))
+            (values (loop rule)
+                    (map (lambda (apair)
+                           (cons (car apair)
+                                 (cddr apair)))
+                           res-alist)))))
+
+      (define (%calc-duplicates ls literals ellipsis)
+        (let loop ((ls ls)
+                   (res '()))
+          (cond
+            ((null? ls) res)
+            ((or (eq? (car ls) ellipsis)
+                 (memq (car ls) literals)
+                 (eq? (car ls) '_))
+             (loop (cdr ls) res))
+            ((memq (car ls) (cdr ls))
+              (loop (remove (lambda (x) (eq? x (car ls))) ls)
+                    (cons (car ls) res)))
+            (else
+              (loop (cdr ls) res)))))
+
+      (define (%search-symbols obj excluded-list)
+        (let* ((ltop (list #f))
+               (tconc (cons ltop ltop)))
+          (let loop ((obj obj))
+            (cond
+              ((pair? obj)
+               (loop (car obj))
+               (loop (cdr obj)))
+              ((vector? obj)
+               (vector-for-each loop obj))
+              ((and (symbol? obj)
+                    (not (memq obj excluded-list)))
+               (set-cdr! (cdr tconc)
+                         (list obj))
+               (set-cdr! tconc
+                         (cddr tconc)))
+              (else)))
+          (cdar tconc)))
+
+      (define (%match-boot ellipsis literal rule input)
+           (call/cc
+             (lambda (break)
+               (let* ((rule-symbols (%search-symbols rule (cons ellipsis literal)))
+                      (duplicates-rules-symbols (%calc-duplicates rule-symbols literal ellipsis)))
+                  (let-values (((new-rule duplicates-alist) (%new-rule&duplicates-alist rule rule-symbols duplicates-rules-symbols)))
+                     (let* ((match-res (%match ellipsis literal new-rule '() input '() break))
+                            (generated-symbols (append-map cdr duplicates-alist))
+                            (not-duplicate-res (remove (lambda (apair)
+                                                         (memq (car apair) generated-symbols))
+                                                       match-res))
+                            (dres
+                                (map (lambda (sym-duplicate-sym-list)
+                                       (let* ((dls-chk (map (lambda (sym)
+                                                              (assq sym
+                                                                    match-res))
+                                                       (cdr sym-duplicate-sym-list)))
+                                              (dls (if (find (lambda (x) x) dls-chk)
+                                                     #f
+                                                     (map cdr dls-chk))))
+                                          (if (or (not dls)
+                                                  (not (null? (remove (lambda (x) (equal? x (car dls))) dls))))
+                                            #f
+                                            (cons (car sym-duplicate-sym-list)
+                                                  (car dls)))))
+                                     duplicates-alist)))
+                        (if (memq #f dres)
+                          #f
+                          (%alists-distinct
+                                  not-duplicate-res
+                                  dres
+                                  (map (lambda (x) (list x)) rule-symbols)))))))))
 
       (define (%tree-ref tree refs break . debug-info)
          (let loop ((refs refs)
@@ -123,7 +218,7 @@
             (let loop ((ls template)
                        (res-cell res-cell-top))
               (cond
-                ((not (pair? ls))
+                ((not-pair? ls)
                  (set-cdr! res-cell (%expand ellipsis ls alist refs break))
                  (cdr res-cell-top))
                 ((and (pair? (cdr ls))
