@@ -1,5 +1,5 @@
 (define-library (niyarin rules)
-   (import (scheme base)(scheme case-lambda))
+   (import (scheme base) (scheme case-lambda))
    (export rules/match rules/expand rules/match-expand)
    (begin
       (define (%parse-list ellipsis-symbol ls)
@@ -109,7 +109,7 @@
               ((and (null? head)
                     (or (eq? type 'ellipsis) (eq? type  'improper-ellipsis-list)))
                (let ((loop-cnt (- (length input) (length tail))))
-                 (when (< loop-cnt 0) (break #f))
+                 (when (negative? loop-cnt) (break #f))
                  (let i-loop ((i loop-cnt)
                               (input input)
                               (res res))
@@ -234,9 +234,8 @@
 
       (define (%match-expand-boot ellipsis literal rule template input)
         (let ((match-res (rules/match ellipsis literal rule input)))
-          (if match-res
-            (rules/expand ellipsis template match-res)
-            #f)))
+          (and match-res
+              (rules/expand ellipsis template match-res))))
 
       (define rules/match-expand
         (case-lambda
