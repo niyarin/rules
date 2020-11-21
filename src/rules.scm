@@ -1,7 +1,5 @@
 (define-library (niyarin rules)
-   (import (scheme base)(scheme case-lambda)
-           (scheme write);debug
-           )
+   (import (scheme base)(scheme case-lambda))
    (export rules/match rules/expand rules/match-expand)
    (begin
       (define (%parse-list ellipsis-symbol ls)
@@ -180,19 +178,25 @@
                  (cdr res-cell-top))
                 ((and (pair? (cdr ls))
                       (eq? (cadr ls) ellipsis))
-                    (let _loop ((i 0)(res-cell res-cell))
-                      (let ((ok (call/cc (lambda (_break)
-                                           (list (%expand ellipsis (car ls) alist (cons i refs) _break))))))
+                    (let _loop ((i 0) (res-cell res-cell))
+                      (let ((ok (call/cc
+                                  (lambda (_break)
+                                     (list (%expand ellipsis (car ls)
+                                                    alist (cons i refs)
+                                                    _break))))))
                         (cond
+                          ((and (pair? ok) ;;not matched symbol ...
+                                (eq? (car ok) (car ls)))
+                           (loop (cddr ls) res-cell))
                           ((not (integer? ok))
                             (set-cdr! res-cell ok)
                             (_loop (+ i 1) (cdr res-cell)))
-                          ((zero? (- ok 1))
-                           (loop (cddr ls) res-cell))
-                          (else
-                            (break (- ok 1)))))))
+                          ((zero? (- ok 1)) (loop (cddr ls) res-cell))
+                          (else (break (- ok 1)))))))
                 (else
-                  (set-cdr! res-cell (list (%expand ellipsis (car ls) alist refs break)))
+                  (set-cdr! res-cell
+                            (list (%expand ellipsis (car ls)
+                                           alist refs break)))
                   (loop (cdr ls) (cdr res-cell)))))))
 
 
